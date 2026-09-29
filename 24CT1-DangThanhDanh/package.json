@@ -1,5 +1,5 @@
 {
-  "name": "24ct1-dangthanhdanh",
+  "name": "shopsach77",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,9 +7,15 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server": "node server/index.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mysql2": "^3.24.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
