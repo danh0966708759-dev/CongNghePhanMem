@@ -1,1 +1,5 @@
 
+[build]
+  base = "24CT1-DangThanhDanh"
+  command = "npm run build"
+  publish = "dist"
