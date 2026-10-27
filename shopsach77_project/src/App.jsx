@@ -39,9 +39,7 @@ const initialProducts = [
   { id: 20, title: 'Pinocchio', author: 'Carlo Collodi', price: 59000, oldPrice: 75000, category: 'Thiếu nhi', badge: 'Nên đọc', img: 'https://images.unsplash.com/photo-1495446815901-a7297e633e8d?auto=format&fit=crop&w=500&q=80', description: 'Câu chuyện về cậu bé người gỗ Pinocchio và hành trình học cách trung thực, tốt bụng và có trách nhiệm.', hidden: false },
 ]
 
-const defaultUsers = [
-  { id: 'admin-1', name: 'Admin Shop', email: 'admin@shopsach77.vn', password: 'admin123', role: 'admin' },
-]
+const defaultUsers = []
 
 
 const STORAGE_KEYS = {
@@ -84,7 +82,6 @@ function Icon({ name }) {
   }
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>
 }
-
 function App() {
   const [products, setProducts] = useState(() => {
     const storedProducts = readStorage(STORAGE_KEYS.products, null)
@@ -201,40 +198,29 @@ function App() {
     setAuthOpen(true)
   }
 
-  const handleLogin = async (e) => {
+  const handleLogin = (e) => {
     e.preventDefault()
 
     const email = authForm.email.trim().toLowerCase()
-    const localUser = users.find(user => user.email.toLowerCase() === email && user.password === authForm.password)
-    if (localUser) {
-      setCurrentUser(localUser)
-      setAuthOpen(false)
-      setAuthForm({ name: '', email: '', password: '' })
+    const password = authForm.password
+
+    if (!email || !password) {
+      alert('Vui lòng nhập đầy đủ email và mật khẩu.')
       return
     }
 
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password: authForm.password,
-        }),
-      })
-
-      const result = await response.json()
-      if (!response.ok) {
-        alert(result.message || 'Email hoặc mật khẩu không đúng.')
-        return
-      }
-
-      setCurrentUser(result)
-      setAuthOpen(false)
-      setAuthForm({ name: '', email: '', password: '' })
-    } catch {
-      alert('Chưa kết nối được máy chủ đăng nhập. Hãy chạy npm run server và MySQL, hoặc kiểm tra lại tài khoản.')
+    const user = users.find(item => item.email?.toLowerCase() === email && item.password === password)
+    if (!user) {
+      alert('Email hoặc mật khẩu không chính xác.')
+      return
     }
+
+    const userProfile = { ...user }
+    delete userProfile.password
+    setCurrentUser(userProfile)
+    setAuthOpen(false)
+    setAuthForm({ name: '', email: '', password: '' })
+    alert(`Đăng nhập thành công! Xin chào ${user.name}`)
   }
 
   const handleRegister = (e) => {
@@ -242,30 +228,35 @@ function App() {
 
     const trimmedName = authForm.name.trim()
     const trimmedEmail = authForm.email.trim().toLowerCase()
+    const password = authForm.password
 
-    if (!trimmedName || !trimmedEmail || !authForm.password) {
-      alert('Vui lòng điền đủ thông tin.')
+    if (!trimmedName || !trimmedEmail || !password) {
+      alert('Vui lòng điền đủ họ tên, email và mật khẩu.')
       return
     }
 
-    if (users.some(u => u.email.toLowerCase() === trimmedEmail)) {
+    if (password.length < 6) {
+      alert('Mật khẩu phải có ít nhất 6 ký tự.')
+      return
+    }
+
+    if (users.some(user => user.email?.toLowerCase() === trimmedEmail)) {
       alert('Email này đã được đăng ký.')
       return
     }
 
     const newUser = {
-      id: Date.now().toString(),
+      id: Date.now(),
       name: trimmedName,
       email: trimmedEmail,
-      password: authForm.password,
+      password,
       role: 'customer',
     }
-
     setUsers(prev => [...prev, newUser])
-    setCurrentUser(newUser)
+    setCurrentUser({ id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role })
     setAuthOpen(false)
     setAuthForm({ name: '', email: '', password: '' })
-    alert('Đăng ký thành công! Bạn đã được đăng nhập.')
+    alert('Đăng ký tài khoản thành công!')
   }
 
   const handleLogout = () => {
@@ -298,8 +289,14 @@ function App() {
     )
   }
 
+
   const toggleProductHidden = (id) => {
-    setProducts(prev => prev.map(item => item.id === id ? { ...item, hidden: !item.hidden } : item))
+    const product = products.find(item => item.id === id)
+    if (!product) return
+
+    const hidden = !product.hidden
+    setProducts(prev => prev.map(item => item.id === id ? { ...item, hidden } : item))
+    alert(hidden ? 'Đã ẩn sách!' : 'Đã hiện sách!')
   }
 
   const resetProductForm = () => {
@@ -318,56 +315,42 @@ function App() {
 
   const handleAddProduct = (e) => {
     e.preventDefault()
-
     if (!productForm.title.trim() || !productForm.author.trim() || !productForm.img.trim()) {
       alert('Vui lòng điền tên sách, tác giả và ảnh.')
       return
     }
-
     const price = Number(productForm.price)
     const oldPrice = Number(productForm.oldPrice) || price
-
     if (!Number.isFinite(price) || price <= 0) {
       alert('Giá sách không hợp lệ.')
       return
     }
-
     const productData = {
       title: productForm.title.trim(),
       author: productForm.author.trim(),
       category: productForm.category,
-      price,
-      oldPrice,
+      price, oldPrice,
       badge: productForm.badge || 'Mới',
       stock: Math.max(0, Number(productForm.stock) || 0),
       img: productForm.img.trim(),
+      description: '',
+      hidden: false,
     }
-
-    if (editingProductId !== null) {
-      const productExists = products.some(item => item.id === editingProductId)
-
-      if (!productExists) {
-        alert('Không tìm thấy sách cần cập nhật. Vui lòng chọn lại sách.')
-        resetProductForm()
-        return
-      }
-
-      setProducts(prev => prev.map(item => item.id === editingProductId ? { ...item, ...productData } : item))
-      setSelected(prev => prev?.id === editingProductId ? { ...prev, ...productData } : prev)
-      setCart(prev => prev.map(item => item.id === editingProductId ? { ...item, ...productData } : item))
-      resetProductForm()
+    const isEditing = editingProductId !== null
+    if (isEditing) {
+      const updatedProduct = { ...productData, id: editingProductId }
+      setProducts(prev => prev.map(item => item.id === editingProductId ? updatedProduct : item))
+      setSelected(prev => prev?.id === editingProductId ? { ...prev, ...updatedProduct } : prev)
+      setCart(prev => prev.map(item => item.id === editingProductId ? { ...item, ...updatedProduct } : item))
       alert('Cập nhật sách thành công!')
-      return
     } else {
       const newProduct = {
-        id: Date.now(),
         ...productData,
-        hidden: false,
+        id: Math.max(0, ...products.map(item => Number(item.id) || 0)) + 1,
       }
       setProducts(prev => [newProduct, ...prev])
       alert('Thêm sách thành công!')
     }
-
     resetProductForm()
   }
 
@@ -388,11 +371,10 @@ function App() {
   const handleDeleteProduct = (id) => {
     const product = products.find(item => item.id === id)
     if (!product) return
-
     const confirmDelete = window.confirm(`Bạn có chắc muốn xóa sách "${product.title}" không?`)
     if (!confirmDelete) return
-
     setProducts(prev => prev.filter(item => item.id !== id))
+    alert('Đã xóa sách.')
   }
 
   const addBorrowBook = (product) => {
