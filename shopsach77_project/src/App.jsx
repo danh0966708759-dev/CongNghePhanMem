@@ -1,6 +1,67 @@
 import { useMemo, useState, useEffect } from 'react'
 import './App.css'
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || ''
+const APP_BASE_PATH = import.meta.env.BASE_URL.replace(/\/+$/, '')
+const getCurrentView = () => {
+  const path = window.location.pathname.replace(/\/+$/, '')
+  return (path === '/admin' || path.endsWith('/admin') || window.location.hash === '#admin') ? 'admin' : 'shop'
+}
+
+const phpApiUrl = path => {
+  const encode = value => encodeURIComponent(value)
+  let endpoint = path
+  let query = ''
+  if (path === '/api/products') endpoint = '/php/api/products.php'
+  else if (path.startsWith('/api/products/')) {
+    endpoint = '/php/api/products.php'
+    query = `?id=${encode(path.slice('/api/products/'.length))}`
+  } else if (path === '/api/auth/login') endpoint = '/php/api/login.php'
+  else if (path === '/api/auth/admin/login') endpoint = '/php/api/login.php?admin=1'
+  else if (path === '/api/auth/register') endpoint = '/php/api/register.php'
+  else if (path === '/api/auth/session' || path === '/api/auth/logout') endpoint = '/php/api/session.php'
+  else if (path === '/api/orders') endpoint = '/php/api/orders.php'
+  else if (path === '/api/users') endpoint = '/php/api/admin.php?resource=users'
+  else if (path === '/api/admin/orders') endpoint = '/php/api/admin.php?resource=orders'
+  else if (path.startsWith('/api/admin/orders/')) {
+    const match = path.match(/^\/api\/admin\/orders\/([^/]+)(?:\/(status))?$/)
+    if (match) {
+      endpoint = `/php/api/admin.php?resource=orders&id=${encode(match[1])}`
+      if (match[2] === 'status') endpoint += '&action=status'
+    }
+  } else if (path === '/api/admin/borrow-slips') endpoint = '/php/api/admin.php?resource=borrow-slips'
+  else if (path.startsWith('/api/admin/borrow-slips/')) {
+    endpoint = `/php/api/admin.php?resource=borrow-slips&id=${encode(path.slice('/api/admin/borrow-slips/'.length))}`
+  }
+  return `${API_BASE_URL}${endpoint}${query}`
+}
+
+const requestApi = async (path, options = {}) => {
+  const response = await fetch(phpApiUrl(path), {
+    credentials: 'include',
+    ...options,
+    headers: {
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers,
+    },
+  })
+  const body = await response.text()
+  let result = {}
+  if (body) {
+    try {
+      result = JSON.parse(body)
+    } catch {
+      if (response.ok) throw new Error('Phản hồi từ máy chủ không hợp lệ.')
+    }
+  }
+  if (!response.ok) {
+    const error = new Error(result.message || `Yêu cầu thất bại (${response.status}).`)
+    error.status = response.status
+    throw error
+  }
+  return result
+}
+
 const categories = ['Tất cả', 'Văn học', 'Kinh tế', 'Kỹ năng sống', 'Thiếu nhi', 'Manga - Comic']
 const categoryMenu = [
   { name: 'Văn học', children: ['Văn học hiện đại', 'Văn học kinh điển', 'Văn học thiếu nhi', 'Lãng mạn', 'Tản văn', 'Thơ - kịch'] },
@@ -39,9 +100,6 @@ const initialProducts = [
   { id: 20, title: 'Pinocchio', author: 'Carlo Collodi', price: 59000, oldPrice: 75000, category: 'Thiếu nhi', badge: 'Nên đọc', img: 'https://images.unsplash.com/photo-1495446815901-a7297e633e8d?auto=format&fit=crop&w=500&q=80', description: 'Câu chuyện về cậu bé người gỗ Pinocchio và hành trình học cách trung thực, tốt bụng và có trách nhiệm.', hidden: false },
 ]
 
-const defaultUsers = []
-
-
 const STORAGE_KEYS = {
   users: 'shopsach77_users',
   session: 'shopsach77_session',
@@ -50,6 +108,70 @@ const STORAGE_KEYS = {
   borrowSlips: 'shopsach77_borrow_slips',
   favorites: 'shopsach77_favorites',
 }
+
+const defaultUsers = [
+  { id: 'admin-1', name: 'Quản trị viên Shop', email: 'admin@shopsach77.vn', password: 'admin123', role: 'admin' },
+  { id: 'user-1', name: 'Đặng Thành Danh', email: 'danh24ct1@dau.edu.vn', password: '123456', role: 'customer' },
+  { id: 'user-2', name: 'Nguyễn Thị Mai', email: 'mainguyen@gmail.com', password: '123456', role: 'customer' },
+  { id: 'user-3', name: 'Trần Văn Hoàng', email: 'hoangtran@gmail.com', password: '123456', role: 'customer' },
+]
+
+const defaultBorrowSlips = [
+  {
+    id: 'PM-17912001',
+    memberName: 'Đặng Thành Danh',
+    memberEmail: 'danh24ct1@dau.edu.vn',
+    dueDate: '2026-10-15',
+    status: 'Đang mượn',
+    createdAt: '2026-10-01T08:00:00.000Z',
+    items: [{ id: 3, title: 'Đắc nhân tâm', qty: 1 }, { id: 8, title: 'Cây cam ngọt của tôi', qty: 1 }],
+  },
+  {
+    id: 'PM-17912002',
+    memberName: 'Lê Thị Thu Thảo',
+    memberEmail: 'thao.le@gmail.com',
+    dueDate: '2026-10-16',
+    status: 'Đang mượn',
+    createdAt: '2026-10-02T09:30:00.000Z',
+    items: [{ id: 2, title: 'Tuổi trẻ đáng giá bao nhiêu?', qty: 1 }],
+  },
+]
+
+const defaultOrders = [
+  {
+    id: 'S77894215',
+    orderCode: 'S77894215',
+    customerName: 'Đặng Thành Danh',
+    customerEmail: 'danh24ct1@dau.edu.vn',
+    customerPhone: '0966708759',
+    customerAddress: 'Đà Nẵng',
+    note: 'Giao giờ hành chính',
+    total: 148000,
+    paymentMethod: 'Chuyển khoản mã QR Agribank',
+    paymentStatus: 'Đã thanh toán qua mã QR (Chờ xác nhận)',
+    createdAt: '2026-10-06T09:15:00.000Z',
+    items: [
+      { id: 1, title: 'Nhà giả kim', qty: 1, price: 79000 },
+      { id: 2, title: 'Tuổi trẻ đáng giá bao nhiêu?', qty: 1, price: 69000 },
+    ],
+  },
+  {
+    id: 'S77512498',
+    orderCode: 'S77512498',
+    customerName: 'Nguyễn Thị Mai',
+    customerEmail: 'mainguyen@gmail.com',
+    customerPhone: '0912345678',
+    customerAddress: 'Hà Nội',
+    note: 'Giao buổi sáng',
+    total: 115000,
+    paymentMethod: 'Chuyển khoản mã QR Agribank',
+    paymentStatus: 'Đã xác nhận thanh toán',
+    createdAt: '2026-10-06T10:30:00.000Z',
+    items: [
+      { id: 5, title: 'Đi tìm lẽ sống', qty: 1, price: 115000 },
+    ],
+  },
+]
 
 const formatPrice = (n) => n.toLocaleString('vi-VN') + 'đ'
 const normalizeText = (value) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -82,30 +204,31 @@ function Icon({ name }) {
   }
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>
 }
+
 function App() {
+  const [currentView, setCurrentView] = useState(getCurrentView)
+  const [adminTab, setAdminTab] = useState('products')
+  const [adminSearch, setAdminSearch] = useState('')
+  const [adminCategoryFilter, setAdminCategoryFilter] = useState('Tất cả')
+  const [adminStockFilter, setAdminStockFilter] = useState('all')
+  const [showProductForm, setShowProductForm] = useState(false)
+
   const [products, setProducts] = useState(() => {
-    const storedProducts = readStorage(STORAGE_KEYS.products, null)
-    if (!storedProducts) return initialProducts.map(product => ({ ...product, stock: 5 }))
-
-    const updatedStoredProducts = storedProducts.map(item => {
-      const defaultProduct = initialProducts.find(product => product.id === item.id)
-      if (!defaultProduct) return item
-
-      const isChildrenProductReplacement = item.id >= 17 && item.id <= 20
-      const updatedProduct = isChildrenProductReplacement
-        ? { ...defaultProduct, hidden: item.hidden, stock: item.stock ?? 5 }
-        : (!item.description ? { ...item, description: defaultProduct.description, stock: item.stock ?? 5 } : { ...item, stock: item.stock ?? 5 })
-      return isChildrenProductReplacement
-        ? { ...updatedProduct, img: defaultProduct.img }
-        : updatedProduct
-    })
-    const missingProducts = initialProducts.filter(product => !storedProducts.some(item => item.id === product.id))
-    return [...updatedStoredProducts, ...missingProducts]
+    const stored = readStorage(STORAGE_KEYS.products, null)
+    return stored || initialProducts.map(product => ({ ...product, stock: 5 }))
   })
   const [users, setUsers] = useState(() => readStorage(STORAGE_KEYS.users, defaultUsers))
   const [currentUser, setCurrentUser] = useState(() => readStorage(STORAGE_KEYS.session, null))
-  const [orders, setOrders] = useState(() => readStorage(STORAGE_KEYS.orders, []))
-  const [borrowSlips, setBorrowSlips] = useState(() => readStorage(STORAGE_KEYS.borrowSlips, []))
+  const [isAdminVerified, setIsAdminVerified] = useState(() => {
+    const session = readStorage(STORAGE_KEYS.session, null)
+    return session?.role === 'admin'
+  })
+  const [adminLoginForm, setAdminLoginForm] = useState({ email: '', password: '' })
+  const [adminLoginError, setAdminLoginError] = useState('')
+  const [adminLoginLoading, setAdminLoginLoading] = useState(false)
+  const [orders, setOrders] = useState(() => readStorage(STORAGE_KEYS.orders, defaultOrders))
+  const [borrowSlips, setBorrowSlips] = useState(() => readStorage(STORAGE_KEYS.borrowSlips, defaultBorrowSlips))
+  const [dataSyncError, setDataSyncError] = useState('')
   const [favorites, setFavorites] = useState(() => readStorage(STORAGE_KEYS.favorites, []))
   const [category, setCategory] = useState('Tất cả')
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false)
@@ -125,7 +248,6 @@ function App() {
   const [authOpen, setAuthOpen] = useState(false)
   const [authMode, setAuthMode] = useState('login')
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' })
-  const [adminOpen, setAdminOpen] = useState(false)
   const [editingProductId, setEditingProductId] = useState(null)
   const [productForm, setProductForm] = useState({
     title: '',
@@ -141,6 +263,28 @@ function App() {
   const [borrowOpen, setBorrowOpen] = useState(false)
   const [borrowForm, setBorrowForm] = useState({ memberName: '', memberEmail: '', dueDate: '' })
   const [borrowItems, setBorrowItems] = useState([])
+
+  const navigateTo = (view) => {
+    setCurrentView(view)
+    if (view === 'admin') {
+      window.history.pushState({ view: 'admin' }, '', `${APP_BASE_PATH}/admin`)
+    } else {
+      window.history.pushState({ view: 'shop' }, '', APP_BASE_PATH ? `${APP_BASE_PATH}/` : '/')
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentView(getCurrentView())
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify(favorites))
+  }, [favorites])
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.products, JSON.stringify(products))
@@ -159,10 +303,6 @@ function App() {
   }, [borrowSlips])
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify(favorites))
-  }, [favorites])
-
-  useEffect(() => {
     if (currentUser) {
       localStorage.setItem(STORAGE_KEYS.session, JSON.stringify(currentUser))
     } else {
@@ -170,6 +310,105 @@ function App() {
     }
   }, [currentUser])
 
+  useEffect(() => {
+    let active = true
+    const verifySession = async () => {
+      try {
+        const result = await requestApi('/api/auth/session')
+        if (active && result?.user) {
+          setCurrentUser(result.user)
+          setIsAdminVerified(result.user.role === 'admin')
+          setDataSyncError('')
+        }
+      } catch (error) {
+        if (!active) return
+        if (error.status === 401) {
+          const localSession = readStorage(STORAGE_KEYS.session, null)
+          if (!localSession) {
+            setCurrentUser(null)
+            setIsAdminVerified(false)
+          }
+        }
+      }
+    }
+
+    verifySession()
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const loadProducts = async () => {
+      try {
+        const rows = await requestApi('/api/products')
+        if (!Array.isArray(rows)) throw new Error('Dữ liệu sách từ máy chủ không hợp lệ.')
+        if (active) {
+          setProducts(rows)
+          setDataSyncError('')
+        }
+      } catch (error) {
+        if (active) setDataSyncError(`Không tải được dữ liệu sách mới nhất: ${error.message}`)
+      }
+    }
+    loadProducts()
+    const timer = window.setInterval(loadProducts, 30000)
+    window.addEventListener('focus', loadProducts)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', loadProducts)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isAdminVerified) return undefined
+    let active = true
+    const loadAdminData = async () => {
+      try {
+        const [loadedUsers, loadedOrders, loadedSlips] = await Promise.all([
+          requestApi('/api/users'),
+          requestApi('/api/admin/orders'),
+          requestApi('/api/admin/borrow-slips'),
+        ])
+        if (!active) return
+        setUsers(loadedUsers)
+        setOrders(loadedOrders)
+        setBorrowSlips(loadedSlips)
+        setDataSyncError('')
+      } catch (error) {
+        if (active) setDataSyncError(`Không thể đồng bộ dữ liệu quản trị: ${error.message}`)
+      }
+    }
+    loadAdminData()
+    const timer = window.setInterval(loadAdminData, 30000)
+    window.addEventListener('focus', loadAdminData)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', loadAdminData)
+    }
+  }, [isAdminVerified])
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== 'customer') return undefined
+    let active = true
+    const loadOrders = async () => {
+      try {
+        const rows = await requestApi('/api/orders')
+        if (active) setOrders(rows)
+      } catch (error) {
+        if (active) setDataSyncError(`Không thể tải đơn hàng: ${error.message}`)
+      }
+    }
+    loadOrders()
+    const timer = window.setInterval(loadOrders, 30000)
+    window.addEventListener('focus', loadOrders)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+      window.removeEventListener('focus', loadOrders)
+    }
+  }, [currentUser])
   const filtered = useMemo(() => products.filter(p =>
     !p.hidden &&
     (!query.trim() && category !== 'Tất cả' ? p.category === category : true) &&
@@ -185,6 +424,19 @@ function App() {
     )
   }, [products, query])
 
+  const adminFilteredProducts = useMemo(() => {
+    return products.filter(product => {
+      const matchSearch = !adminSearch.trim() || normalizeText(`${product.title} ${product.author}`).includes(normalizeText(adminSearch.trim()))
+      const matchCategory = adminCategoryFilter === 'Tất cả' || product.category === adminCategoryFilter
+      const matchStock = adminStockFilter === 'all'
+        ? true
+        : adminStockFilter === 'in_stock'
+          ? (product.stock ?? 0) > 0
+          : (product.stock ?? 0) === 0
+      return matchSearch && matchCategory && matchStock
+    })
+  }, [products, adminSearch, adminCategoryFilter, adminStockFilter])
+
   const total = cart.reduce((sum, i) => sum + i.price * i.qty, 0)
   const cartCount = cart.reduce((sum, i) => sum + i.qty, 0)
 
@@ -198,32 +450,59 @@ function App() {
     setAuthOpen(true)
   }
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault()
-
     const email = authForm.email.trim().toLowerCase()
     const password = authForm.password
-
     if (!email || !password) {
       alert('Vui lòng nhập đầy đủ email và mật khẩu.')
       return
     }
 
-    const user = users.find(item => item.email?.toLowerCase() === email && item.password === password)
-    if (!user) {
-      alert('Email hoặc mật khẩu không chính xác.')
+    try {
+      const result = await requestApi('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      })
+      const user = result.user || result
+      setCurrentUser(user)
+      const isAdmin = user.role === 'admin'
+      setIsAdminVerified(isAdmin)
+      setAuthOpen(false)
+      setAuthForm({ name: '', email: '', password: '' })
+      if (isAdmin) {
+        navigateTo('admin')
+        alert(`Đăng nhập thành công với quyền Quản trị viên! Đang chuyển sang Trang Quản Trị Admin.`)
+      } else {
+        alert(`Đăng nhập thành công! Xin chào ${user.name}`)
+      }
       return
-    }
+    } catch (apiError) {
+      // Offline fallback: kiểm tra trong users hoặc defaultUsers
+      const foundUser = users.find(u => u.email?.toLowerCase() === email && u.password === password)
+        || defaultUsers.find(u => u.email?.toLowerCase() === email && u.password === password)
 
-    const userProfile = { ...user }
-    delete userProfile.password
-    setCurrentUser(userProfile)
-    setAuthOpen(false)
-    setAuthForm({ name: '', email: '', password: '' })
-    alert(`Đăng nhập thành công! Xin chào ${user.name}`)
+      if (foundUser) {
+        const userProfile = { id: foundUser.id, name: foundUser.name, email: foundUser.email, role: foundUser.role }
+        setCurrentUser(userProfile)
+        const isAdmin = userProfile.role === 'admin'
+        setIsAdminVerified(isAdmin)
+        setAuthOpen(false)
+        setAuthForm({ name: '', email: '', password: '' })
+        if (isAdmin) {
+          navigateTo('admin')
+          alert(`Đăng nhập thành công với quyền Quản trị viên! Đang chuyển sang Trang Quản Trị Admin.`)
+        } else {
+          alert(`Đăng nhập thành công! Xin chào ${userProfile.name}`)
+        }
+        return
+      }
+
+      alert(apiError.message || 'Email hoặc mật khẩu không chính xác.')
+    }
   }
 
-  const handleRegister = (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault()
 
     const trimmedName = authForm.name.trim()
@@ -240,29 +519,32 @@ function App() {
       return
     }
 
-    if (users.some(user => user.email?.toLowerCase() === trimmedEmail)) {
-      alert('Email này đã được đăng ký.')
+    try {
+      const result = await requestApi('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ name: trimmedName, email: trimmedEmail, password }),
+      })
+      const user = result.user || result
+      setCurrentUser(user)
+      setIsAdminVerified(false)
+      setAuthOpen(false)
+      setAuthForm({ name: '', email: '', password: '' })
+      alert(`Đăng ký tài khoản thành công! Xin chào ${user.name}`)
       return
+    } catch (apiError) {
+      alert(apiError.message || 'Không thể đăng ký tài khoản. Vui lòng kiểm tra kết nối database rồi thử lại.')
     }
-
-    const newUser = {
-      id: Date.now(),
-      name: trimmedName,
-      email: trimmedEmail,
-      password,
-      role: 'customer',
-    }
-    setUsers(prev => [...prev, newUser])
-    setCurrentUser({ id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role })
-    setAuthOpen(false)
-    setAuthForm({ name: '', email: '', password: '' })
-    alert('Đăng ký tài khoản thành công!')
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await requestApi('/api/auth/logout', { method: 'POST' })
+    } catch {
+      // offline fallback
+    }
     setCurrentUser(null)
+    setIsAdminVerified(false)
     setCart([])
-    setAdminOpen(false)
     setCartOpen(false)
   }
 
@@ -290,12 +572,21 @@ function App() {
   }
 
 
-  const toggleProductHidden = (id) => {
+  const toggleProductHidden = async (id) => {
     const product = products.find(item => item.id === id)
     if (!product) return
 
     const hidden = !product.hidden
-    setProducts(prev => prev.map(item => item.id === id ? { ...item, hidden } : item))
+    try {
+      const updatedProduct = await requestApi(`/api/products/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...product, hidden }),
+      })
+      setProducts(prev => prev.map(item => item.id === id ? updatedProduct : item))
+      setDataSyncError('')
+    } catch {
+      setProducts(prev => prev.map(item => item.id === id ? { ...item, hidden } : item))
+    }
     alert(hidden ? 'Đã ẩn sách!' : 'Đã hiện sách!')
   }
 
@@ -313,7 +604,7 @@ function App() {
     setEditingProductId(null)
   }
 
-  const handleAddProduct = (e) => {
+  const handleAddProduct = async (e) => {
     e.preventDefault()
     if (!productForm.title.trim() || !productForm.author.trim() || !productForm.img.trim()) {
       alert('Vui lòng điền tên sách, tác giả và ảnh.')
@@ -333,25 +624,35 @@ function App() {
       badge: productForm.badge || 'Mới',
       stock: Math.max(0, Number(productForm.stock) || 0),
       img: productForm.img.trim(),
-      description: '',
-      hidden: false,
+      description: products.find(item => item.id === editingProductId)?.description || '',
+      hidden: products.find(item => item.id === editingProductId)?.hidden || false,
     }
     const isEditing = editingProductId !== null
-    if (isEditing) {
-      const updatedProduct = { ...productData, id: editingProductId }
-      setProducts(prev => prev.map(item => item.id === editingProductId ? updatedProduct : item))
-      setSelected(prev => prev?.id === editingProductId ? { ...prev, ...updatedProduct } : prev)
-      setCart(prev => prev.map(item => item.id === editingProductId ? { ...item, ...updatedProduct } : item))
-      alert('Cập nhật sách thành công!')
-    } else {
-      const newProduct = {
-        ...productData,
-        id: Math.max(0, ...products.map(item => Number(item.id) || 0)) + 1,
+    try {
+      const savedProduct = isEditing
+        ? await requestApi(`/api/products/${editingProductId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ ...productData, id: editingProductId }),
+        })
+        : await requestApi('/api/products', {
+          method: 'POST',
+          body: JSON.stringify(productData),
+        })
+      if (isEditing) {
+        setProducts(prev => prev.map(item => item.id === editingProductId ? savedProduct : item))
+        setSelected(prev => prev?.id === editingProductId ? { ...prev, ...savedProduct } : prev)
+        setCart(prev => prev.map(item => item.id === editingProductId ? { ...item, ...savedProduct } : item))
+        alert('Cập nhật sách thành công!')
+      } else {
+        setProducts(prev => [savedProduct, ...prev])
+        alert('Thêm sách thành công!')
       }
-      setProducts(prev => [newProduct, ...prev])
-      alert('Thêm sách thành công!')
+      setDataSyncError('')
+      resetProductForm()
+    } catch (error) {
+      setDataSyncError(`Không thể lưu sách vào database: ${error.message}`)
+      alert(`Không thể lưu sách vào database: ${error.message}`)
     }
-    resetProductForm()
   }
 
   const handleEditProduct = (product) => {
@@ -368,11 +669,17 @@ function App() {
     })
   }
 
-  const handleDeleteProduct = (id) => {
+  const handleDeleteProduct = async (id) => {
     const product = products.find(item => item.id === id)
     if (!product) return
     const confirmDelete = window.confirm(`Bạn có chắc muốn xóa sách "${product.title}" không?`)
     if (!confirmDelete) return
+    try {
+      await requestApi(`/api/products/${id}`, { method: 'DELETE' })
+      setDataSyncError('')
+    } catch {
+      // local fallback
+    }
     setProducts(prev => prev.filter(item => item.id !== id))
     alert('Đã xóa sách.')
   }
@@ -405,31 +712,92 @@ function App() {
     setBorrowItems([])
   }
 
-  const handleBorrowSubmit = (e) => {
+  const handleBorrowSubmit = async (e) => {
     e.preventDefault()
     if (!borrowForm.memberName.trim() || !borrowForm.memberEmail.trim() || !borrowForm.dueDate || !borrowItems.length) {
       alert('Vui lòng nhập người mượn, email, hạn trả và chọn ít nhất một sách.')
       return
     }
 
-    const slip = {
-      id: `PM-${Date.now()}`,
-      memberName: borrowForm.memberName.trim(),
-      memberEmail: borrowForm.memberEmail.trim().toLowerCase(),
-      dueDate: borrowForm.dueDate,
-      createdAt: new Date().toISOString(),
-      status: 'Đang mượn',
-      items: borrowItems.map(item => ({ id: item.id, title: item.title, qty: item.qty })),
+    try {
+      const result = await requestApi('/api/admin/borrow-slips', {
+        method: 'POST',
+        body: JSON.stringify({
+          memberName: borrowForm.memberName.trim(),
+          memberEmail: borrowForm.memberEmail.trim().toLowerCase(),
+          dueDate: borrowForm.dueDate,
+          items: borrowItems.map(item => ({ id: item.id, qty: item.qty })),
+        }),
+      })
+      setBorrowSlips(prev => [result.slip, ...prev])
+      if (result.stockByProduct) {
+        setProducts(prev => prev.map(product => Object.hasOwn(result.stockByProduct, product.id)
+          ? { ...product, stock: result.stockByProduct[product.id] }
+          : product))
+      }
+      setDataSyncError('')
+      resetBorrowForm()
+      setBorrowOpen(false)
+      alert(`Đã lập phiếu mượn ${result.slip.id}. Số lượng sách đã được cập nhật.`)
+    } catch {
+      // Local fallback
+      const slipId = `PM-${Date.now().toString().slice(-8)}`
+      const newSlip = {
+        id: slipId,
+        memberName: borrowForm.memberName.trim(),
+        memberEmail: borrowForm.memberEmail.trim().toLowerCase(),
+        dueDate: borrowForm.dueDate,
+        status: 'Đang mượn',
+        createdAt: new Date().toISOString(),
+        items: borrowItems.map(item => ({ id: item.id, title: item.title, qty: item.qty })),
+      }
+      setBorrowSlips(prev => [newSlip, ...prev])
+      setProducts(prev => prev.map(product => {
+        const item = borrowItems.find(b => Number(b.id) === Number(product.id))
+        return item ? { ...product, stock: Math.max(0, (product.stock ?? 0) - item.qty) } : product
+      }))
+      resetBorrowForm()
+      setBorrowOpen(false)
+      alert(`Đã lập phiếu mượn ${slipId}. Số lượng sách trong kho đã được cập nhật.`)
+    }
+  }
+
+  const updateBorrowSlipStatus = async (slipId, newStatus) => {
+    const slip = borrowSlips.find(s => s.id === slipId)
+    if (!slip) return
+
+    const oldStatus = slip.status
+    try {
+      await requestApi(`/api/admin/borrow-slips/${encodeURIComponent(slipId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: newStatus }),
+      })
+    } catch {
+      // Fallback
     }
 
-    setBorrowSlips(prev => [slip, ...prev])
-    setProducts(prev => prev.map(product => {
-      const borrowed = borrowItems.find(item => item.id === product.id)
-      return borrowed ? { ...product, stock: Math.max(0, (product.stock ?? 0) - borrowed.qty) } : product
-    }))
-    resetBorrowForm()
-    setBorrowOpen(false)
-    alert(`Đã lập phiếu mượn ${slip.id}. Số lượng sách đã được cập nhật.`)
+    setBorrowSlips(prev => prev.map(s => s.id === slipId ? { ...s, status: newStatus } : s))
+
+    if (newStatus === 'Đã trả' && oldStatus !== 'Đã trả') {
+      setProducts(prev => prev.map(product => {
+        const item = slip.items?.find(i => Number(i.id) === Number(product.id))
+        return item ? { ...product, stock: (product.stock ?? 0) + (item.qty || 1) } : product
+      }))
+      alert(`Đã cập nhật: Phiếu ${slipId} đã trả sách. Số lượng sách đã được hoàn vào kho!`)
+    } else {
+      alert(`Đã cập nhật trạng thái phiếu mượn ${slipId}: ${newStatus}`)
+    }
+  }
+
+  const handleDeleteBorrowSlip = async (slipId) => {
+    if (!window.confirm(`Bạn có chắc muốn xóa phiếu mượn ${slipId}?`)) return
+    try {
+      await requestApi(`/api/admin/borrow-slips/${encodeURIComponent(slipId)}`, { method: 'DELETE' })
+    } catch {
+      // Fallback
+    }
+    setBorrowSlips(prev => prev.filter(s => s.id !== slipId))
+    alert(`Đã xóa phiếu mượn ${slipId}.`)
   }
 
   const openCheckout = () => {
@@ -476,7 +844,7 @@ function App() {
     document.body.removeChild(el)
   }
 
-  const handleCheckoutSubmit = (e) => {
+  const handleCheckoutSubmit = async (e) => {
     if (e) e.preventDefault()
 
     if (!currentUser) {
@@ -510,41 +878,55 @@ function App() {
       return
     }
 
-    const orderId = checkoutCode || `S77${Date.now().toString().slice(-6)}`
-    const order = {
-      id: orderId,
-      orderCode: orderId,
-      customerName: name,
-      customerPhone: phone,
-      customerAddress: address,
-      customerEmail: currentUser.email,
-      note: checkoutForm.note.trim(),
-      items: [...cart],
-      total,
-      paymentMethod: 'Quét mã QR thanh toán',
-      paymentStatus: 'Đã thanh toán qua mã QR (Chờ xác nhận)',
-      createdAt: new Date().toISOString(),
+    try {
+      const result = await requestApi('/api/orders', {
+        method: 'POST',
+        body: JSON.stringify({
+          customerName: name,
+          customerPhone: phone,
+          customerAddress: address,
+          note: checkoutForm.note.trim(),
+          items: cart.map(item => ({ id: item.id, qty: item.qty })),
+        }),
+      })
+      setProducts(prev => prev.map(product => Object.hasOwn(result.stockByProduct, product.id)
+        ? { ...product, stock: result.stockByProduct[product.id] }
+        : product))
+      setOrders(prev => [result.order, ...prev])
+      setCart([])
+      setCheckout(false)
+      setSuccessOrder(result.order)
+      setDataSyncError('')
+    } catch (error) {
+      setDataSyncError(`Không thể tạo đơn hàng: ${error.message}`)
+      alert(error.message)
     }
-
-    // Cập nhật số lượng tồn kho của sách
-    setProducts(prev => prev.map(product => {
-      const cartItem = cart.find(item => item.id === product.id)
-      return cartItem ? { ...product, stock: Math.max(0, (product.stock ?? 0) - cartItem.qty) } : product
-    }))
-
-    setOrders(prev => [order, ...prev])
-    setCart([])
-    setCheckout(false)
-    setSuccessOrder(order)
   }
 
-  const updateOrderStatus = (orderId, newStatus) => {
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paymentStatus: newStatus } : o))
+  const updateOrderStatus = async (orderId, newStatus) => {
+    try {
+      await requestApi(`/api/admin/orders/${encodeURIComponent(orderId)}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: newStatus }),
+      })
+      setOrders(prev => prev.map(order => order.id === orderId ? { ...order, paymentStatus: newStatus } : order))
+      setDataSyncError('')
+    } catch (error) {
+      setDataSyncError(`Không thể cập nhật đơn hàng: ${error.message}`)
+      alert(error.message)
+    }
   }
 
-  const handleDeleteOrder = (orderId) => {
+  const handleDeleteOrder = async (orderId) => {
     if (window.confirm('Bạn có chắc muốn xóa đơn hàng này khỏi hệ thống?')) {
-      setOrders(prev => prev.filter(o => o.id !== orderId))
+      try {
+        await requestApi(`/api/admin/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' })
+        setOrders(prev => prev.filter(order => order.id !== orderId))
+        setDataSyncError('')
+      } catch (error) {
+        setDataSyncError(`Không thể xóa đơn hàng: ${error.message}`)
+        alert(error.message)
+      }
     }
   }
 
@@ -569,9 +951,610 @@ function App() {
     setTimeout(() => document.getElementById('products')?.scrollIntoView({ behavior: 'smooth' }), 0)
   }
 
+  const handleAdminLogin = async (e) => {
+    e.preventDefault()
+    setAdminLoginError('')
+    setAdminLoginLoading(true)
+    const email = adminLoginForm.email.trim().toLowerCase()
+    const password = adminLoginForm.password
+    try {
+      const result = await requestApi('/api/auth/admin/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      })
+      const user = result.user || result
+      setCurrentUser(user)
+      setIsAdminVerified(true)
+      localStorage.setItem(STORAGE_KEYS.session, JSON.stringify(user))
+      return
+    } catch (error) {
+      // Offline fallback
+      const foundAdmin = users.find(u => u.email?.toLowerCase() === email && u.password === password && u.role === 'admin')
+        || defaultUsers.find(u => u.email?.toLowerCase() === email && u.password === password && u.role === 'admin')
+
+      if (foundAdmin) {
+        const userProfile = { id: foundAdmin.id, name: foundAdmin.name, email: foundAdmin.email, role: 'admin' }
+        setCurrentUser(userProfile)
+        setIsAdminVerified(true)
+        localStorage.setItem(STORAGE_KEYS.session, JSON.stringify(userProfile))
+        return
+      }
+
+      setAdminLoginError(error.message || 'Email hoặc mật khẩu quản trị không đúng. Vui lòng kiểm tra lại.')
+    } finally {
+      setAdminLoginLoading(false)
+    }
+  }
+
+  // ============================================================
+  // LUỒNG 1: DÀNH CHO QUẢN TRỊ VIÊN (ADMIN DASHBOARD / LOGIN)
+  // ============================================================
+  if (currentView === 'admin') {
+    // Nếu chưa đăng nhập với quyền admin -> Giao diện Đăng nhập Quản trị
+    if (!currentUser || currentUser.role !== 'admin') {
+      return (
+        <main className="admin-login-page">
+          <form className="admin-login-card" onSubmit={handleAdminLogin}>
+            <div className="logo" style={{ cursor: 'pointer' }} onClick={() => navigateTo('shop')}>
+              <span className="logo-mark">S77</span>
+              <span><b>SHOP SÁCH 77</b><small>Đọc sách • Sống hay</small></span>
+            </div>
+            <span className="eyebrow">HỆ THỐNG QUẢN TRỊ VIÊN</span>
+            <h1>Đăng nhập Quản trị</h1>
+            <p style={{ fontSize: '13px', color: '#666', marginTop: '-6px', marginBottom: '16px' }}>
+              Dành riêng cho ban quản trị cửa hàng và thủ thư
+            </p>
+
+
+            <label>
+              Email Quản trị
+              <input
+                type="email"
+                autoComplete="username"
+                required
+                placeholder="admin@shopsach77.vn"
+                value={adminLoginForm.email}
+                onChange={e => setAdminLoginForm({ ...adminLoginForm, email: e.target.value })}
+              />
+            </label>
+            <label>
+              Mật khẩu
+              <input
+                type="password"
+                autoComplete="current-password"
+                required
+                placeholder="••••••••"
+                value={adminLoginForm.password}
+                onChange={e => setAdminLoginForm({ ...adminLoginForm, password: e.target.value })}
+              />
+            </label>
+
+            {adminLoginError && <p className="admin-login-error" role="alert">{adminLoginError}</p>}
+
+            <button type="submit" className="primary full" disabled={adminLoginLoading} style={{ marginTop: '10px' }}>
+              {adminLoginLoading ? 'ĐANG XÁC THỰC...' : 'ĐĂNG NHẬP VÀO ADMIN'}
+            </button>
+
+
+          </form>
+        </main>
+      )
+    }
+
+    // Đã đăng nhập Admin -> Giao diện Quản trị viên chuyên biệt toàn màn hình
+    return (
+      <div className="admin-layout">
+        {/* Top Navbar */}
+        <header className="admin-top-navbar">
+          <div className="admin-brand-group">
+            <a href="#" className="admin-brand-logo" onClick={(e) => { e.preventDefault(); navigateTo('shop'); }}>
+              <span className="logo-mark">S77</span>
+              <span>SHOP SÁCH</span>
+            </a>
+            <span className="admin-brand-tag">HỆ THỐNG QUẢN TRỊ</span>
+          </div>
+
+          <div className="admin-header-actions">
+            <button className="btn-store-view" onClick={() => navigateTo('shop')}>
+              🛒 Xem Giao diện Khách hàng
+            </button>
+            <div className="admin-user-info">
+              👤 <b>{currentUser.name}</b>
+            </div>
+            <button className="btn-admin-logout" onClick={handleLogout}>
+              Đăng xuất
+            </button>
+          </div>
+        </header>
+
+        {/* Tab Navigation */}
+        <nav className="admin-tabs-nav">
+          <button
+            className={`admin-tab-item ${adminTab === 'products' ? 'active' : ''}`}
+            onClick={() => setAdminTab('products')}
+          >
+            📦 Quản lý sản phẩm ({products.length})
+          </button>
+          <button
+            className={`admin-tab-item ${adminTab === 'library' ? 'active' : ''}`}
+            onClick={() => setAdminTab('library')}
+          >
+            📚 Quản lý thư viện ({borrowSlips.length})
+          </button>
+          <button
+            className={`admin-tab-item ${adminTab === 'orders' ? 'active' : ''}`}
+            onClick={() => setAdminTab('orders')}
+          >
+            📋 Quản lý đơn hàng ({orders.length})
+          </button>
+          <button
+            className={`admin-tab-item ${adminTab === 'stats' ? 'active' : ''}`}
+            onClick={() => setAdminTab('stats')}
+          >
+            📊 Thống kê & Báo cáo
+          </button>
+        </nav>
+
+        {/* Main Content Area */}
+        <main className="admin-content-area">
+          {dataSyncError && <div className="data-sync-error" style={{ marginBottom: '16px' }}>{dataSyncError}</div>}
+
+          {/* TAB 1: QUẢN LÝ SẢN PHẨM */}
+          {adminTab === 'products' && (
+            <div className="admin-panel-card">
+              <div className="admin-panel-header">
+                <div>
+                  <h2>Quản lý sản phẩm & Kho sách ({products.length} đầu sách)</h2>
+                  <p>Thêm mới, sửa thông tin, ẩn/hiển thị hoặc xóa sách trong kho hàng</p>
+                </div>
+                <button
+                  type="button"
+                  className="primary"
+                  style={{ padding: '9px 18px', fontSize: '12px', fontWeight: 700 }}
+                  onClick={() => {
+                    if (showProductForm && editingProductId === null) {
+                      setShowProductForm(false)
+                    } else {
+                      resetProductForm()
+                      setShowProductForm(true)
+                    }
+                  }}
+                >
+                  {showProductForm ? '✕ ĐÓNG BIỂU MẪU' : '+ THÊM SÁCH MỚI'}
+                </button>
+              </div>
+
+              {/* Form thêm / chỉnh sửa sách */}
+              {showProductForm && (
+                <div className="admin-product-form-card">
+                  <h3>
+                    {editingProductId !== null ? '✏️ Chỉnh sửa thông tin sách' : '➕ Thêm sách mới vào kho'}
+                  </h3>
+                  <form className="admin-product-form" onSubmit={handleAddProduct}>
+                    <div className="admin-form-grid">
+                      <label>Tên sách<input value={productForm.title} onChange={e => setProductForm({ ...productForm, title: e.target.value })} placeholder="Nhập tên sách" required /></label>
+                      <label>Tác giả<input value={productForm.author} onChange={e => setProductForm({ ...productForm, author: e.target.value })} placeholder="Nhập tên tác giả" required /></label>
+                      <label>Thể loại<select value={productForm.category} onChange={e => setProductForm({ ...productForm, category: e.target.value })}>{categories.filter(item => item !== 'Tất cả').map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+                      <label>Badge (Huy hiệu)<input value={productForm.badge} onChange={e => setProductForm({ ...productForm, badge: e.target.value })} placeholder="Mới / Bán chạy / -20%" /></label>
+                      <label>Giá bán (VNĐ)<input type="number" min="0" value={productForm.price} onChange={e => setProductForm({ ...productForm, price: e.target.value })} placeholder="79000" required /></label>
+                      <label>Giá niêm yết cũ (VNĐ)<input type="number" min="0" value={productForm.oldPrice} onChange={e => setProductForm({ ...productForm, oldPrice: e.target.value })} placeholder="99000" /></label>
+                      <label>Số lượng tồn kho<input type="number" min="0" value={productForm.stock} onChange={e => setProductForm({ ...productForm, stock: e.target.value })} placeholder="5" required /></label>
+                      <label className="full-width-input">Link ảnh bìa sách (URL)<input value={productForm.img} onChange={e => setProductForm({ ...productForm, img: e.target.value })} placeholder="https://images.unsplash.com/..." required /></label>
+                    </div>
+                    {productForm.img && (
+                      <div style={{ marginTop: '10px' }}>
+                        <small style={{ color: '#777' }}>Xem trước ảnh:</small><br />
+                        <img className="admin-preview" src={productForm.img} alt="Preview" style={{ marginTop: '4px', maxHeight: '100px', objectFit: 'cover', borderRadius: '4px' }} />
+                      </div>
+                    )}
+                    <div className="admin-form-actions" style={{ marginTop: '16px', display: 'flex', gap: '10px' }}>
+                      <button type="submit" className="primary" style={{ padding: '10px 24px', fontWeight: 700 }}>
+                        {editingProductId !== null ? 'LƯU THAY ĐỔI' : 'THÊM VÀO KHO'}
+                      </button>
+                      <button type="button" className="secondary-btn" onClick={() => { resetProductForm(); setShowProductForm(false); }}>
+                        HỦY BỎ
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Bộ lọc sản phẩm */}
+              <div className="admin-filter-bar">
+                <input
+                  type="text"
+                  placeholder="🔍 Tìm theo tên sách, tác giả..."
+                  value={adminSearch}
+                  onChange={e => setAdminSearch(e.target.value)}
+                  style={{ minWidth: '260px' }}
+                />
+                <select value={adminCategoryFilter} onChange={e => setAdminCategoryFilter(e.target.value)}>
+                  {categories.map(c => <option key={c} value={c}>Thể loại: {c}</option>)}
+                </select>
+                <select value={adminStockFilter} onChange={e => setAdminStockFilter(e.target.value)}>
+                  <option value="all">Tất cả tồn kho</option>
+                  <option value="in_stock">Còn sách trong kho</option>
+                  <option value="out_of_stock">Đã hết hàng</option>
+                </select>
+                <span className="admin-results-summary">
+                  Hiển thị <b>{adminFilteredProducts.length}</b> / {products.length} cuốn sách
+                </span>
+              </div>
+
+              {/* Bảng danh sách sản phẩm */}
+              <div className="admin-table-responsive">
+                <table className="admin-data-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '60px' }}>Ảnh</th>
+                      <th>Tên sách & Tác giả</th>
+                      <th>Thể loại</th>
+                      <th>Giá bán</th>
+                      <th>Tồn kho</th>
+                      <th>Trạng thái</th>
+                      <th style={{ textAlign: 'right' }}>Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminFilteredProducts.length ? adminFilteredProducts.map(product => (
+                      <tr key={product.id}>
+                        <td>
+                          <img src={product.img} alt={product.title} className="table-thumb" />
+                        </td>
+                        <td>
+                          <div className="admin-product-title">{product.title}</div>
+                          <div className="admin-product-author">{product.author}</div>
+                          {product.badge && <span className="admin-product-badge">{product.badge}</span>}
+                        </td>
+                        <td>
+                          <span className="admin-category-badge">
+                            {product.category}
+                          </span>
+                        </td>
+                        <td>
+                          <b className="admin-price-value">{formatPrice(product.price)}</b>
+                          {product.oldPrice && product.oldPrice > product.price && (
+                            <div className="admin-price-old">
+                              {formatPrice(product.oldPrice)}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <span className={`stock-tag ${(product.stock ?? 0) > 0 ? 'stock-ok' : 'stock-out'}`}>
+                            {(product.stock ?? 0) > 0 ? `Còn ${product.stock} cuốn` : 'Hết hàng'}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`status-badge ${product.hidden ? 'badge-pending' : 'badge-paid'}`}>
+                            {product.hidden ? 'Đang ẩn' : 'Hiển thị'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <button
+                            type="button"
+                            className="btn-admin-action edit"
+                            onClick={() => {
+                              handleEditProduct(product)
+                              setShowProductForm(true)
+                              window.scrollTo({ top: 150, behavior: 'smooth' })
+                            }}
+                          >
+                            Sửa
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-admin-action toggle-hide"
+                            onClick={() => toggleProductHidden(product.id)}
+                          >
+                            {product.hidden ? 'Hiện' : 'Ẩn'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-admin-action danger"
+                            onClick={() => handleDeleteProduct(product.id)}
+                          >
+                            Xóa
+                          </button>
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan="7" style={{ textAlign: 'center', padding: '30px', color: '#888' }}>
+                          Không tìm thấy sản phẩm nào phù hợp với bộ lọc.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: QUẢN LÝ THƯ VIỆN & PHIẾU MƯỢN SÁCH */}
+          {adminTab === 'library' && (
+            <div className="admin-panel-card">
+              <div className="admin-panel-header">
+                <div>
+                  <h2>Quản lý Thư viện - Danh sách Phiếu mượn sách</h2>
+                  <p>Theo dõi độc giả mượn/trả sách, kiểm soát hạn trả và số lượng sách trong kho</p>
+                </div>
+                <button
+                  type="button"
+                  className="primary"
+                  style={{ padding: '9px 18px', fontSize: '12px', fontWeight: 700 }}
+                  onClick={() => setBorrowOpen(true)}
+                >
+                  + LẬP PHIẾU MƯỢN MỚI
+                </button>
+              </div>
+
+              {/* Thống kê nhanh mượn trả */}
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '20px' }}>
+                <div style={{ background: '#f5f3ef', padding: '10px 16px', borderRadius: '8px', fontSize: '13px' }}>
+                  Tổng phiếu mượn: <b>{borrowSlips.length}</b>
+                </div>
+                <div style={{ background: '#fef3c7', color: '#92400e', padding: '10px 16px', borderRadius: '8px', fontSize: '13px' }}>
+                  Đang mượn: <b>{borrowSlips.filter(s => s.status === 'Đang mượn').length}</b>
+                </div>
+                <div style={{ background: '#ecfdf5', color: '#065f46', padding: '10px 16px', borderRadius: '8px', fontSize: '13px' }}>
+                  Đã trả sách: <b>{borrowSlips.filter(s => s.status === 'Đã trả').length}</b>
+                </div>
+                <div style={{ background: '#fee2e2', color: '#991b1b', padding: '10px 16px', borderRadius: '8px', fontSize: '13px' }}>
+                  Quá hạn: <b>{borrowSlips.filter(s => s.status === 'Quá hạn').length}</b>
+                </div>
+              </div>
+
+              {borrowSlips.length ? (
+                <div className="admin-orders-grid">
+                  {borrowSlips.map(slip => (
+                    <div className="admin-order-card" key={slip.id}>
+                      <div className="admin-order-top">
+                        <div>
+                          <span className="order-code-badge">{slip.id}</span>
+                          <span className="order-date">Hạn trả: <b>{slip.dueDate}</b></span>
+                        </div>
+                        <div className="order-status-actions">
+                          <span className={`status-badge ${
+                            slip.status === 'Đã trả' ? 'badge-paid' :
+                            slip.status === 'Quá hạn' ? 'badge-pending' : 'badge-pending'
+                          }`}>
+                            {slip.status || 'Đang mượn'}
+                          </span>
+                          <select
+                            value={slip.status || 'Đang mượn'}
+                            onChange={(e) => updateBorrowSlipStatus(slip.id, e.target.value)}
+                            className="status-select"
+                          >
+                            <option value="Đang mượn">Đang mượn</option>
+                            <option value="Đã trả">Đã trả (Hoàn trả vào kho)</option>
+                            <option value="Quá hạn">Quá hạn</option>
+                          </select>
+                          <button
+                            type="button"
+                            className="btn-delete-order"
+                            onClick={() => handleDeleteBorrowSlip(slip.id)}
+                            title="Xóa phiếu mượn"
+                          >
+                            Xóa
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="admin-order-customer">
+                        <div><b>Độc giả mượn:</b> {slip.memberName} ({slip.memberEmail})</div>
+                        {slip.createdAt && <div><small className="order-date">Ngày lập phiếu: {new Date(slip.createdAt).toLocaleString('vi-VN')}</small></div>}
+                      </div>
+
+                      <div className="admin-order-items-preview">
+                        <b>Sách mượn ({slip.items?.length || 0}):</b> {slip.items?.map(item => `${item.title} (x${item.qty})`).join(', ')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ padding: '30px', textAlign: 'center', color: '#888' }}>Chưa có phiếu mượn nào.</p>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: QUẢN LÝ ĐƠN HÀNG */}
+          {adminTab === 'orders' && (
+            <div className="admin-panel-card">
+              <div className="admin-panel-header">
+                <div>
+                  <h2>Quản lý Đơn hàng ({orders.length} đơn)</h2>
+                  <p>Xác nhận thanh toán chuyển khoản mã QR và cập nhật tiến độ giao hàng</p>
+                </div>
+              </div>
+
+              {orders.length ? (
+                <div className="admin-orders-grid">
+                  {orders.map(order => (
+                    <div className="admin-order-card" key={order.id}>
+                      <div className="admin-order-top">
+                        <div>
+                          <span className="order-code-badge">#{order.orderCode || order.id}</span>
+                          <span className="order-date">{new Date(order.createdAt).toLocaleString('vi-VN')}</span>
+                        </div>
+                        <div className="order-status-actions">
+                          <span className={`status-badge ${order.paymentStatus === 'Đã xác nhận thanh toán' || order.paymentStatus === 'Hoàn tất'
+                            ? 'badge-paid'
+                            : 'badge-pending'
+                            }`}>
+                            {order.paymentStatus || 'Chờ xác nhận'}
+                          </span>
+                          <select
+                            value={order.paymentStatus || 'Chờ xác nhận chuyển khoản'}
+                            onChange={(e) => updateOrderStatus(order.id, e.target.value)}
+                            className="status-select"
+                          >
+                            <option value="Chờ xác nhận chuyển khoản">Chờ xác nhận chuyển khoản</option>
+                            <option value="Đã thanh toán qua mã QR (Chờ xác nhận)">Đã thanh toán qua mã QR (Chờ xác nhận)</option>
+                            <option value="Đã xác nhận thanh toán">Đã xác nhận thanh toán</option>
+                            <option value="Đang giao hàng">Đang giao hàng</option>
+                            <option value="Hoàn tất">Hoàn tất</option>
+                            <option value="Đã hủy">Đã hủy</option>
+                          </select>
+                          <button
+                            type="button"
+                            className="btn-delete-order"
+                            onClick={() => handleDeleteOrder(order.id)}
+                            title="Xóa đơn hàng"
+                          >
+                            Xóa
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="admin-order-customer">
+                        <div><b>Khách hàng:</b> {order.customerName} ({order.customerEmail})</div>
+                        {order.customerPhone && <div><b>Số điện thoại:</b> {order.customerPhone}</div>}
+                        {order.customerAddress && <div><b>Địa chỉ giao hàng:</b> {order.customerAddress}</div>}
+                        {order.note && <div><b>Ghi chú:</b> <i>{order.note}</i></div>}
+                      </div>
+
+                      <div className="admin-order-items-preview">
+                        <b>Sách đặt ({order.items?.length || 0}):</b> {order.items?.map(item => `${item.title} (x${item.qty})`).join(', ')}
+                      </div>
+
+                      <div className="admin-order-bottom">
+                        <span className="payment-method-tag">
+                          <Icon name="qr" /> {order.paymentMethod || 'Chuyển khoản QR'}
+                        </span>
+                        <div className="admin-order-total">
+                          Tổng tiền: <b>{formatPrice(order.total)}</b>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ padding: '30px', textAlign: 'center', color: '#888' }}>Chưa có đơn hàng nào.</p>
+              )}
+            </div>
+          )}
+
+          {/* TAB 4: THỐNG KÊ & BÁO CÁO */}
+          {adminTab === 'stats' && (
+            <div className="admin-panel-card">
+              <div className="admin-panel-header">
+                <div>
+                  <h2>Báo cáo Thống kê Toàn diện</h2>
+                  <p>Số liệu tổng quan hoạt động kinh doanh, thư viện và người dùng</p>
+                </div>
+              </div>
+
+              <div className="stats-cards-grid">
+                <div className="stats-card">
+                  <span className="stats-card-label">Tổng doanh thu bán sách</span>
+                  <span className="stats-card-val">
+                    {formatPrice(orders.reduce((sum, item) => sum + Number(item.total || 0), 0))}
+                  </span>
+                  <span className="stats-card-sub">Từ {orders.length} đơn hàng</span>
+                </div>
+                <div className="stats-card">
+                  <span className="stats-card-label">Tổng số đầu sách</span>
+                  <span className="stats-card-val">{products.length}</span>
+                  <span className="stats-card-sub">{products.reduce((sum, p) => sum + (p.stock || 0), 0)} cuốn đang có trong kho</span>
+                </div>
+                <div className="stats-card">
+                  <span className="stats-card-label">Phiếu mượn thư viện</span>
+                  <span className="stats-card-val">{borrowSlips.length}</span>
+                  <span className="stats-card-sub">{borrowSlips.filter(s => s.status === 'Đang mượn').length} phiếu đang mượn</span>
+                </div>
+                <div className="stats-card">
+                  <span className="stats-card-label">Khách hàng đăng ký</span>
+                  <span className="stats-card-val">{users.filter(u => u.role === 'customer').length}</span>
+                  <span className="stats-card-sub">1 tài khoản Quản trị viên</span>
+                </div>
+              </div>
+
+              <h3 style={{ margin: '24px 0 12px', font: '600 16px Georgia, serif' }}>Danh sách tài khoản người dùng</h3>
+              <div className="admin-table-responsive">
+                <table className="admin-data-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Họ và tên</th>
+                      <th>Email</th>
+                      <th>Vai trò</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map(u => (
+                      <tr key={u.id}>
+                        <td><code>{u.id}</code></td>
+                        <td><b>{u.name}</b></td>
+                        <td>{u.email}</td>
+                        <td>
+                          <span className={`status-badge ${u.role === 'admin' ? 'badge-paid' : 'badge-pending'}`}>
+                            {u.role === 'admin' ? 'Quản trị viên (Admin)' : 'Khách hàng (Customer)'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </main>
+
+        {/* Modal Lập phiếu mượn nếu được mở từ Admin */}
+        {borrowOpen && (
+          <div className="overlay" onClick={() => setBorrowOpen(false)}>
+            <div className="modal borrow-modal" onClick={e => e.stopPropagation()}>
+              <button className="close" onClick={() => setBorrowOpen(false)}><Icon name="close" /></button>
+              <span className="eyebrow">QUẢN LÝ THƯ VIỆN</span>
+              <h2>Lập phiếu mượn sách mới</h2>
+              <form onSubmit={handleBorrowSubmit} className="borrow-form">
+                <div className="borrow-form-fields">
+                  <label>Họ tên độc giả<input value={borrowForm.memberName} onChange={e => setBorrowForm({ ...borrowForm, memberName: e.target.value })} placeholder="Nguyễn Văn A" required /></label>
+                  <label>Email độc giả<input type="email" value={borrowForm.memberEmail} onChange={e => setBorrowForm({ ...borrowForm, memberEmail: e.target.value })} placeholder="email@example.com" required /></label>
+                  <label>Hạn trả sách<input type="date" value={borrowForm.dueDate} onChange={e => setBorrowForm({ ...borrowForm, dueDate: e.target.value })} required /></label>
+                </div>
+                <div className="borrow-book-picker">
+                  <h3>Chọn sách còn trong kho</h3>
+                  <div className="borrow-book-list">
+                    {products.filter(product => !product.hidden && (product.stock ?? 0) > 0).map(product => (
+                      <button type="button" className="borrow-book-option" key={product.id} onClick={() => addBorrowBook(product)}>
+                        <img src={product.img} alt={product.title} />
+                        <span><b>{product.title}</b><small>Còn {product.stock} cuốn</small></span>
+                        <strong>+</strong>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="borrow-selected">
+                  <h3>Sách trong phiếu mượn ({borrowItems.length})</h3>
+                  {borrowItems.length ? borrowItems.map(item => (
+                    <div className="borrow-selected-item" key={item.id}>
+                      <span>{item.title}</span>
+                      <div>
+                        <button type="button" onClick={() => changeBorrowQty(item.id, -1)}>-</button>
+                        <b>{item.qty}</b>
+                        <button type="button" onClick={() => changeBorrowQty(item.id, 1)}>+</button>
+                      </div>
+                    </div>
+                  )) : <p>Chưa chọn cuốn sách nào.</p>}
+                </div>
+                <button className="primary full" type="submit">LƯU VÀ TẠO PHIẾU MƯỢN</button>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ============================================================
+  // LUỒNG 2: DÀNH CHO KHÁCH HÀNG (CUSTOMER STOREFRONT VIEW)
+  // ============================================================
+
   return (
     <div className="site">
       <div className="topbar">MIỄN PHÍ VẬN CHUYỂN ĐƠN TỪ 300.000Đ • ĐỔI TRẢ TRONG 7 NGÀY</div>
+      {dataSyncError && <div className="data-sync-error" role="alert">{dataSyncError}</div>}
 
       <header className="header">
         <div className="header-inner">
@@ -596,9 +1579,9 @@ function App() {
 
           <div className="header-actions">
             {currentUser && currentUser.role === 'admin' && (
-              <button className="action" onClick={() => setAdminOpen(true)}>
+              <button className="action admin-nav-btn" onClick={() => navigateTo('admin')} title="Vào trang quản trị admin">
                 <Icon name="dashboard" />
-                <span>Quản trị</span>
+                <span>⚙️ Quản trị</span>
               </button>
             )}
 
@@ -606,10 +1589,15 @@ function App() {
               <div className="account-menu">
                 <button className="action account-trigger" title={`Tài khoản ${currentUser.name}`}>
                   <Icon name="user" />
-                  <span>{currentUser.name}</span>
+                  <span>{currentUser.name} {currentUser.role === 'admin' ? '(Admin)' : ''}</span>
                 </button>
                 <div className="account-dropdown">
-                  <button onClick={() => setMyOrdersOpen(true)}>Đơn hàng của tôi</button>
+                  {currentUser.role === 'admin' && (
+                    <button onClick={() => navigateTo('admin')}>⚙️ Vào Trang Quản Trị Admin</button>
+                  )}
+                  {currentUser.role === 'customer' && (
+                    <button onClick={() => setMyOrdersOpen(true)}>Đơn hàng của tôi</button>
+                  )}
                   <button onClick={handleLogout}>Đăng xuất</button>
                 </div>
               </div>
@@ -1012,136 +2000,11 @@ function App() {
         {authMode === 'register' && <label>Họ và tên<input value={authForm.name} onChange={e => setAuthForm({ ...authForm, name: e.target.value })} placeholder="Nguyễn Văn A" /></label>}
         <label>Email<input type="email" value={authForm.email} onChange={e => setAuthForm({ ...authForm, email: e.target.value })} placeholder="abc@gmail.com" /></label>
         <label>Mật khẩu<input type="password" value={authForm.password} onChange={e => setAuthForm({ ...authForm, password: e.target.value })} placeholder="••••••••" /></label>
+
         <button type="submit" className="primary full">{authMode === 'login' ? 'ĐĂNG NHẬP' : 'TẠO TÀI KHOẢN'}</button>
         <button type="button" className="auth-switch" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? 'Chưa có tài khoản? Đăng ký' : 'Đã có tài khoản? Đăng nhập'}</button>
       </form></div></div>}
 
-      {adminOpen && currentUser?.role === 'admin' && <div className="overlay" onClick={() => setAdminOpen(false)}><div className="modal admin-modal" onClick={e => e.stopPropagation()}><button className="close" onClick={() => setAdminOpen(false)}><Icon name="close" /></button><span className="eyebrow">ADMIN</span><h2>Quản lý website</h2><div className="admin-grid">
-        <div className="admin-box">
-          <h3>Thống kê</h3>
-          <p>Tổng khách hàng: <b>{users.filter(u => u.role === 'customer').length}</b></p>
-          <p>Tổng đơn hàng: <b>{orders.length}</b></p>
-          <p>Doanh thu: <b>{formatPrice(orders.reduce((sum, item) => sum + Number(item.total || 0), 0))}</b></p>
-          <p>Phiếu mượn đang lập: <b>{borrowSlips.filter(slip => slip.status === 'Đang mượn').length}</b></p>
-          <button className="primary full borrow-open-button" onClick={() => { setAdminOpen(false); setBorrowOpen(true) }}>+ LẬP PHIẾU MƯỢN SÁCH</button>
-        </div>
-
-        <div className="admin-box full-width">
-          <h3>{editingProductId !== null ? 'Chỉnh sửa sách' : 'Thêm sách mới'}</h3>
-          <form className="admin-product-form" onSubmit={handleAddProduct}>
-            <div className="admin-form-grid">
-              <label>Tên sách<input value={productForm.title} onChange={e => setProductForm({ ...productForm, title: e.target.value })} placeholder="Nhập tên sách" /></label>
-              <label>Tác giả<input value={productForm.author} onChange={e => setProductForm({ ...productForm, author: e.target.value })} placeholder="Nhập tên tác giả" /></label>
-              <label>Thể loại<select value={productForm.category} onChange={e => setProductForm({ ...productForm, category: e.target.value })}>{categories.filter(item => item !== 'Tất cả').map(item => <option key={item} value={item}>{item}</option>)}</select></label>
-              <label>Badge<input value={productForm.badge} onChange={e => setProductForm({ ...productForm, badge: e.target.value })} placeholder="Mới / Bán chạy" /></label>
-              <label>Giá bán<input type="number" value={productForm.price} onChange={e => setProductForm({ ...productForm, price: e.target.value })} placeholder="79000" /></label>
-              <label>Giá cũ<input type="number" value={productForm.oldPrice} onChange={e => setProductForm({ ...productForm, oldPrice: e.target.value })} placeholder="99000" /></label>
-              <label>Số lượng tồn<input type="number" min="0" value={productForm.stock} onChange={e => setProductForm({ ...productForm, stock: e.target.value })} placeholder="5" /></label>
-              <label className="full-width-input">Ảnh (URL)<input value={productForm.img} onChange={e => setProductForm({ ...productForm, img: e.target.value })} placeholder="https://..." /></label>
-            </div>
-            {productForm.img && <img className="admin-preview" src={productForm.img} alt="Preview" />}
-            <div className="admin-form-actions">
-              <button type="submit" className="primary full">{editingProductId !== null ? 'LƯU THAY ĐỔI' : 'THÊM SÁCH'}</button>
-              {editingProductId !== null && <button type="button" className="secondary-btn" onClick={resetProductForm}>HỦY</button>}
-            </div>
-          </form>
-        </div>
-
-        <div className="admin-box full-width">
-          <h3>Quản lý sản phẩm</h3>
-          <div className="admin-product-list">
-            {products.map(product => (
-              <div className="admin-product" key={product.id}>
-                <img src={product.img} alt={product.title} className="admin-product-thumb" />
-                <div className="admin-product-info">
-                  <strong>{product.title}</strong>
-                  <small>{product.category} • Còn {product.stock ?? 0} cuốn • {product.hidden ? 'Đang ẩn' : 'Đang hiển thị'}</small>
-                </div>
-                <div className="admin-product-actions">
-                  <button onClick={() => handleEditProduct(product)}>Sửa</button>
-                  <button onClick={() => toggleProductHidden(product.id)}>{product.hidden ? 'Hiển thị' : 'Ẩn'}</button>
-                  <button className="danger" onClick={() => handleDeleteProduct(product.id)}>Xóa</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="admin-box full-width">
-          <h3>Danh sách phiếu mượn</h3>
-          {borrowSlips.length ? borrowSlips.map(slip => <div className="order-item" key={slip.id}><strong>{slip.id}<small>{slip.memberName} · Hạn trả {slip.dueDate}</small></strong><span>{slip.items.map(item => `${item.title} x${item.qty}`).join(', ')}</span><b>{slip.status}</b></div>) : <p>Chưa có phiếu mượn nào.</p>}
-        </div>
-
-        <div className="admin-box full-width">
-          <div className="admin-box-header-row">
-            <h3>Danh sách đơn hàng ({orders.length})</h3>
-            <small className="admin-subtitle">Quản lý và xác nhận chuyển khoản ngân hàng</small>
-          </div>
-          {orders.length ? (
-            <div className="admin-orders-grid">
-              {orders.map(order => (
-                <div className="admin-order-card" key={order.id}>
-                  <div className="admin-order-top">
-                    <div>
-                      <span className="order-code-badge">#{order.orderCode || order.id}</span>
-                      <span className="order-date">{new Date(order.createdAt).toLocaleString('vi-VN')}</span>
-                    </div>
-                    <div className="order-status-actions">
-                      <span className={`status-badge ${order.paymentStatus === 'Đã xác nhận thanh toán' || order.paymentStatus === 'Hoàn tất'
-                        ? 'badge-paid'
-                        : 'badge-pending'
-                        }`}>
-                        {order.paymentStatus || 'Chờ xác nhận'}
-                      </span>
-                      <select
-                        value={order.paymentStatus || 'Chờ xác nhận chuyển khoản'}
-                        onChange={(e) => updateOrderStatus(order.id, e.target.value)}
-                        className="status-select"
-                      >
-                        <option value="Chờ xác nhận chuyển khoản">Chờ xác nhận chuyển khoản</option>
-                        <option value="Đã xác nhận thanh toán">Đã xác nhận thanh toán</option>
-                        <option value="Đang giao hàng">Đang giao hàng</option>
-                        <option value="Hoàn tất">Hoàn tất</option>
-                        <option value="Đã hủy">Đã hủy</option>
-                      </select>
-                      <button
-                        type="button"
-                        className="btn-delete-order"
-                        onClick={() => handleDeleteOrder(order.id)}
-                        title="Xóa đơn hàng"
-                      >
-                        Xóa
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="admin-order-customer">
-                    <div><b>Khách:</b> {order.customerName} ({order.customerEmail})</div>
-                    {order.customerPhone && <div><b>SĐT:</b> {order.customerPhone}</div>}
-                    {order.customerAddress && <div><b>Địa chỉ:</b> {order.customerAddress}</div>}
-                    {order.note && <div><b>Ghi chú:</b> <i>{order.note}</i></div>}
-                  </div>
-
-                  <div className="admin-order-items-preview">
-                    <b>Sách đặt ({order.items?.length || 0}):</b> {order.items?.map(item => `${item.title} (x${item.qty})`).join(', ')}
-                  </div>
-
-                  <div className="admin-order-bottom">
-                    <span className="payment-method-tag">
-                      <Icon name="qr" /> {order.paymentMethod || 'Chuyển khoản QR'}
-                    </span>
-                    <div className="admin-order-total">
-                      Tổng tiền: <b>{formatPrice(order.total)}</b>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p>Chưa có đơn hàng nào.</p>
-          )}
-        </div>
-      </div></div></div>}
     </div>
   )
 }
